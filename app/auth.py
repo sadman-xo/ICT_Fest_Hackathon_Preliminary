@@ -89,7 +89,7 @@ def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.PyJWTError:
-        raise AppError(401, "UNAUTHORIZED", "Invalid or expired token")
+        raise AppError(401, "INVALID_CREDENTIALS", "Invalid or expired token")
 
 
 def revoke_access_token(payload: dict) -> None:
@@ -99,15 +99,15 @@ def revoke_access_token(payload: dict) -> None:
 def get_token_payload(request: Request) -> dict:
     header = request.headers.get("Authorization")
     if not header or not header.startswith("Bearer "):
-        raise AppError(401, "UNAUTHORIZED", "Missing bearer token")
+        raise AppError(401, "INVALID_CREDENTIALS", "Missing bearer token")
     token = header[len("Bearer "):].strip()
     payload = decode_token(token)
     if payload.get("type") != "access":
-        raise AppError(401, "UNAUTHORIZED", "Wrong token type")
+        raise AppError(401, "INVALID_CREDENTIALS", "Wrong token type")
     # if payload.get("sub") in _revoked_tokens:  #checking the wrong shit here
-    #     raise AppError(401, "UNAUTHORIZED", "Token has been revoked")
+    #     raise AppError(401, "INVALID_CREDENTIALS", "Token has been revoked")
     if payload.get("jti") in _revoked_tokens:
-        raise AppError(401, "UNAUTHORIZED", "Token has been revoked")
+        raise AppError(401, "INVALID_CREDENTIALS", "Token has been revoked")
     return payload
 
 
@@ -117,7 +117,7 @@ def get_current_user(
 ) -> User:
     user = db.query(User).filter(User.id == int(payload["sub"])).first()
     if user is None:
-        raise AppError(401, "UNAUTHORIZED", "Unknown user")
+        raise AppError(401, "INVALID_CREDENTIALS", "Unknown user")
     return user
 
 

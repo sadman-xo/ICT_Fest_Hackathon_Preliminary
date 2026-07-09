@@ -76,6 +76,7 @@ def _check_quota(db: Session, user_id: int, now: datetime, start: datetime) -> N
 
 room_locks = defaultdict(Lock)
 user_locks = defaultdict(Lock)
+booking_locks = defaultdict(Lock)
 
 @router.post("/bookings", status_code=201)
 def create_booking(
@@ -153,7 +154,6 @@ def create_booking(
 
                     # Retry only if the reference code was duplicated.
                     if "bookings.reference_code" in str(e.orig):
-                        db.expunge(booking)  # optional, only if still attached
                         continue
                     raise
             else:
@@ -166,7 +166,7 @@ def create_booking(
     stats.record_create(room.id, price_cents)
     cache.invalidate_availability(room.id, start.date().isoformat())
     notifications.notify_created(booking)
-
+    
     return serialize_booking(booking)
 
 
@@ -241,33 +241,35 @@ def cancel_booking(
     if user.role != "admin" and booking.user_id != user.id:
         raise AppError(404, "BOOKING_NOT_FOUND", "Booking not found")
 
-    if booking.status == "cancelled":
-        raise AppError(409, "ALREADY_CANCELLED", "Booking already cancelled")
+    booking_lock = booking_locks[booking_id]
+    with booking_lock:
+        booking = db.query(Booking).filter(Booking.id == booking_id).first()
+        if booking.status == "cancelled":
+            raise AppError(409, "ALREADY_CANCELLED", "Booking already cancelled")
 
-    now = datetime.utcnow()
-    notice = booking.start_time - now
-    notice_hours = int(notice.total_seconds() // 3600)
-    if notice_hours >= 48:
-        refund_percent = 100
-    elif notice >= timedelta(hours=24):
-        refund_percent = 50
-    else:
-        refund_percent = 0
+        now = datetime.utcnow()
+        notice = booking.start_time - now
+        if notice >= timedelta(hours=48):
+            refund_percent = 100
+        elif notice >= timedelta(hours=24):
+            refund_percent = 50
+        else:
+            refund_percent = 0
 
-    refund_log = log_refund(db, booking, refund_percent)
-    refund_amount_cents = refund_log.amount_cents
+        refund_log = log_refund(db, booking, refund_percent)
+        refund_amount_cents = refund_log.amount_cents
 
-    _settlement_pause()
-    booking.status = "cancelled"
-    db.commit()
+        _settlement_pause()
+        booking.status = "cancelled"
+        db.commit()
 
-    stats.record_cancel(booking.room_id, booking.price_cents)
-    cache.invalidate_report(user.org_id)
-    notifications.notify_cancelled(booking)
+        stats.record_cancel(booking.room_id, booking.price_cents)
+        cache.invalidate_report(user.org_id)
+        notifications.notify_cancelled(booking)
 
-    return {
-        "id": booking.id,
-        "status": "cancelled",
-        "refund_percent": refund_percent,
-        "refund_amount_cents": refund_amount_cents,
-    }
+        return {
+            "id": booking.id,
+            "status": "cancelled",
+            "refund_percent": refund_percent,
+            "refund_amount_cents": refund_amount_cents,
+        }
