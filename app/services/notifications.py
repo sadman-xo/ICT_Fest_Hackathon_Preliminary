@@ -20,6 +20,8 @@ def _write_audit(kind: str, booking) -> None:
     # Simulated audit-log formatting/flush.
     time.sleep(0.1)
 
+#same order er notification ana hocche karon nahole deadlock create hobe
+
 
 def notify_created(booking) -> None:
     with _email_lock:
@@ -29,7 +31,7 @@ def notify_created(booking) -> None:
 
 
 def notify_cancelled(booking) -> None:
-    with _audit_lock:
-        _write_audit("cancelled", booking)
-        with _email_lock:
-            _send_email("cancelled", booking)
+    with _email_lock:
+        _send_email("cancelled", booking)
+        with _audit_lock:
+            _write_audit("cancelled", booking)
